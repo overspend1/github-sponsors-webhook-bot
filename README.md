@@ -1,12 +1,17 @@
-# GitHub Sponsors Webhook Bot
+# GitHub Sponsors & Multi-Source Payment Alert Bot
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/python-3.7%2B-blue)](https://www.python.org/downloads/)
 [![Docker](https://img.shields.io/badge/docker-supported-blue)](https://www.docker.com/)
 
-A webhook bot that sends instant Telegram notifications whenever you receive a payment through GitHub Sponsors. Get real-time alerts with complete transaction details directly to your Telegram account.
+A versatile bot that sends instant Telegram notifications for:
+- GitHub Sponsors payments.
+- Binance cryptocurrency deposits and P2P payment receipts.
+- UPI and HDFC Bank transactions (via email parsing).
 
-![GitHub Sponsors Webhook Bot](https://via.placeholder.com/800x400?text=GitHub+Sponsors+Webhook+Bot)
+Get real-time alerts with complete transaction details directly to your Telegram account.
+
+![Multi-Source Payment Alert Bot](https://via.placeholder.com/800x400?text=Multi-Source+Payment+Alert+Bot)
 
 ## 📋 Table of Contents
 
@@ -17,7 +22,9 @@ A webhook bot that sends instant Telegram notifications whenever you receive a p
   - [Option 2: Manual Installation](#option-2-manual-installation)
 - [Configuration](#-configuration)
   - [Environment Variables](#environment-variables)
-  - [GitHub Webhook Setup](#github-webhook-setup)
+  - [GitHub Webhook Setup (for GitHub Sponsors)](#github-webhook-setup-for-github-sponsors)
+  - [Binance API Setup (for Binance Alerts)](#binance-api-setup-for-binance-alerts)
+  - [IMAP Email Setup (for UPI/HDFC Alerts)](#imap-email-setup-for-upihdfc-alerts)
   - [Telegram Bot Setup](#telegram-bot-setup)
 - [Usage](#-usage)
   - [Running the Bot](#running-the-bot)
@@ -33,24 +40,38 @@ A webhook bot that sends instant Telegram notifications whenever you receive a p
 
 ## 🚀 Features
 
-- **Real-time Notifications**: Receive immediate alerts when someone sponsors you on GitHub
-- **Complete Transaction Details**: Get sponsor name, amount, tier selected, and timestamp
-- **Secure Webhook Integration**: Verify webhook signatures for secure communication
-- **Single-File Design**: All functionality in one Python file for simplicity
-- **Docker Support**: Easy deployment with Docker
-- **Customizable**: Configure to meet your specific needs
-- **Lightweight**: Minimal resource requirements
-- **Open Source**: MIT licensed, free to use and modify
+- **Real-time GitHub Sponsors Notifications**: Immediate alerts for new GitHub sponsorships.
+- **Binance Payment Alerts**:
+    - Notifications for new cryptocurrency deposits.
+    - Alerts for completed P2P payment receipts.
+- **UPI & HDFC Bank Alerts (via Email Parsing)**:
+    - Parses emails from a configured IMAP account to detect and notify about UPI and HDFC Bank transactions.
+    - Customizable sender/subject filters for email identification.
+- **Complete Transaction Details**: Get sponsor name, amount, tier, payment source, transaction IDs, and timestamps.
+- **Secure Webhook Integration**: Verifies GitHub webhook signatures.
+- **Secure Credential Management**: Uses environment variables for API keys and sensitive data.
+- **Modular Design**: Payment sources are handled by separate modules for easy extension.
+- **Docker Support**: Easy deployment with Docker.
+- **Customizable**: Configure to meet your specific needs.
+- **Lightweight**: Minimal resource requirements.
+- **Open Source**: MIT licensed, free to use and modify.
 
 ## 📋 Prerequisites
 
 Before you begin, ensure you have the following:
 
 - Python 3.7 or higher
-- A GitHub account with Sponsors enabled
 - A Telegram account
-- A publicly accessible server to receive webhooks (or use a service like ngrok for testing)
 - Docker (optional, for containerized deployment)
+- **For GitHub Sponsors Alerts**:
+    - A GitHub account with Sponsors enabled.
+    - A publicly accessible server to receive webhooks (or use a service like ngrok for testing).
+- **For Binance Alerts (Optional)**:
+    - A Binance account.
+    - Binance API Key and Secret.
+- **For UPI/HDFC Email Alerts (Optional)**:
+    - An email account that receives UPI/HDFC payment notifications.
+    - IMAP access details for that email account (host, port, username, password).
 
 ## 🔧 Installation
 
@@ -60,7 +81,7 @@ The easiest way to get started is using Docker:
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/overspend1/github-sponsors-webhook-bot.git
+   git clone https://github.com/yourusername/github-sponsors-webhook-bot.git
    cd github-sponsors-webhook-bot
    ```
 
@@ -69,12 +90,12 @@ The easiest way to get started is using Docker:
    cp .env.example .env
    ```
 
-3. Edit the `.env` file with your credentials (see [Configuration](#-configuration) section)
+3. Edit the `.env` file with your credentials (see [Configuration](#-configuration) section).
 
 4. Build and run the Docker container:
    ```bash
-   docker build -t github-sponsors-bot .
-   docker run -d -p 5000:5000 --name sponsors-bot --env-file .env github-sponsors-bot
+   docker build -t payment-alert-bot .
+   docker run -d -p 5000:5000 --name payment-alert-bot --env-file .env payment-alert-bot
    ```
 
 ### Option 2: Manual Installation
@@ -83,19 +104,21 @@ If you prefer to run the bot without Docker:
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/overspend1/github-sponsors-webhook-bot.git
+   git clone https://github.com/yourusername/github-sponsors-webhook-bot.git
    cd github-sponsors-webhook-bot
    ```
 
 2. Create a virtual environment:
    ```bash
-   python -m venv venv
+   python3 -m venv venv  # Or use 'python' if 'python3' is not available
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
 3. Install dependencies:
    ```bash
    pip install -r requirements.txt
+   # You might need to install python-binance if not already included
+   # pip install python-binance
    ```
 
 4. Create a `.env` file based on the example:
@@ -103,51 +126,91 @@ If you prefer to run the bot without Docker:
    cp .env.example .env
    ```
 
-5. Edit the `.env` file with your credentials (see [Configuration](#-configuration) section)
+5. Edit the `.env` file with your credentials (see [Configuration](#-configuration) section).
 
 6. Run the bot:
    ```bash
-   python github_sponsors_bot.py
+   python3 github_sponsors_bot.py # Or use 'python'
    ```
 
 ## ⚙️ Configuration
 
 ### Environment Variables
 
-The bot requires the following environment variables to be set in your `.env` file:
+The bot requires various environment variables to be set in your `.env` file. Refer to the [`.env.example`](.env.example) file for a complete list and descriptions. Key variables include:
 
+**Core:**
 | Variable | Description | Example |
-|----------|-------------|--------|
-| `GITHUB_WEBHOOK_SECRET` | Secret for verifying GitHub webhook signatures | `your_webhook_secret` |
+|----------|-------------|---------|
+| `GITHUB_WEBHOOK_SECRET` | Secret for verifying GitHub webhook signatures (for Sponsors) | `your_webhook_secret` |
 | `TELEGRAM_TOKEN` | Telegram Bot API token | `1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZ` |
 | `TELEGRAM_CHAT_ID` | Telegram chat ID to send notifications to | `123456789` |
 | `WEBHOOK_HOST` | Host to bind the webhook server to (optional) | `0.0.0.0` |
 | `WEBHOOK_PORT` | Port to bind the webhook server to (optional) | `5000` |
 
-### GitHub Webhook Setup
+**Binance Alerts (Optional):**
+| Variable | Description |
+|----------|-------------|
+| `BINANCE_API_KEY` | Your Binance API Key |
+| `BINANCE_API_SECRET` | Your Binance API Secret |
+| `BINANCE_POLL_INTERVAL` | Interval in seconds to poll Binance (default: 300) |
 
-1. Go to your GitHub repository or organization settings
-2. Navigate to "Webhooks" and click "Add webhook"
-3. For the Payload URL, enter your server URL (e.g., `https://your-server.com/webhook/github`)
-4. Set Content type to `application/json`
-5. Generate a secure random string to use as your webhook secret:
-   ```bash
-   openssl rand -hex 20
-   ```
-6. Enter this secret in the "Secret" field and in your `.env` file
-7. Under "Which events would you like to trigger this webhook?", select "Let me select individual events"
-8. Check only the "Sponsorships" option
-9. Ensure "Active" is checked and click "Add webhook"
+**IMAP Email Alerts (Optional - for UPI/HDFC):**
+| Variable | Description |
+|----------|-------------|
+| `IMAP_HOST` | IMAP server hostname |
+| `IMAP_PORT` | IMAP server port (default: 993 for SSL) |
+| `IMAP_USER` | IMAP account username |
+| `IMAP_PASSWORD` | IMAP account password |
+| `IMAP_MAILBOX` | Mailbox to check (default: INBOX) |
+| `IMAP_POLL_INTERVAL` | Interval in seconds to poll IMAP (default: 600) |
+| `UPI_EMAIL_SENDER_FILTER` | Optional: Email address or keyword to filter UPI emails |
+| `HDFC_EMAIL_SENDER_FILTER` | Optional: Email address or keyword to filter HDFC emails |
+
+### GitHub Webhook Setup (for GitHub Sponsors)
+
+1. Go to your GitHub repository or organization settings.
+2. Navigate to "Webhooks" and click "Add webhook".
+3. For the Payload URL, enter your server URL (e.g., `https://your-server.com/webhook/github`).
+4. Set Content type to `application/json`.
+5. Generate a secure random string for your webhook secret (e.g., `openssl rand -hex 20`).
+6. Enter this secret in the "Secret" field on GitHub and in your `.env` file (`GITHUB_WEBHOOK_SECRET`).
+7. Under "Which events would you like to trigger this webhook?", select "Let me select individual events".
+8. Check only the "Sponsorships" option.
+9. Ensure "Active" is checked and click "Add webhook".
+
+### Binance API Setup (for Binance Alerts)
+
+1. Log in to your Binance account.
+2. Navigate to API Management (usually under your profile icon).
+3. Create a new API key.
+4. **Important Security Note**:
+    - Grant only necessary permissions (e.g., "Enable Reading" for fetching transaction history). **Do NOT enable trading or withdrawal permissions unless absolutely necessary and you understand the risks.**
+    - Consider restricting API key access to trusted IP addresses if possible.
+5. Copy the API Key and Secret Key to your `.env` file (`BINANCE_API_KEY`, `BINANCE_API_SECRET`).
+
+### IMAP Email Setup (for UPI/HDFC Alerts)
+
+1. Ensure IMAP access is enabled for the email account you want to use.
+2. Gather your IMAP server details:
+    - IMAP Host (e.g., `imap.gmail.com`, `outlook.office365.com`)
+    - IMAP Port (usually 993 for SSL/TLS, or 143 for non-SSL)
+    - Your email username and password (or an app-specific password if your provider requires it, like Gmail with 2FA).
+3. Enter these details into your `.env` file (`IMAP_HOST`, `IMAP_PORT`, `IMAP_USER`, `IMAP_PASSWORD`).
+4. Specify the `IMAP_MAILBOX` (e.g., `INBOX`, or a specific folder where payment emails arrive).
+5. Optionally, set `UPI_EMAIL_SENDER_FILTER` and `HDFC_EMAIL_SENDER_FILTER` to help the bot identify relevant emails. These can be sender email addresses (e.g., `alerts@hdfcbank.com`) or keywords expected in the subject/body.
+
+**Note on Email Parsing**: The accuracy of UPI/HDFC alerts depends heavily on the consistency of email formats. The parsing logic in `payment_sources/imap_alerts.py` may need to be customized based on the specific emails you receive.
 
 ### Telegram Bot Setup
 
-1. Open Telegram and search for [@BotFather](https://t.me/botfather)
-2. Send the command `/newbot` and follow the instructions
-3. BotFather will provide you with a token (copy this to your `.env` file)
-4. Start a chat with your new bot by clicking the link provided by BotFather
-5. To get your chat ID, start a chat with [@userinfobot](https://t.me/userinfobot)
-6. The bot will reply with your account information, including your Chat ID
-7. Copy this Chat ID to your `.env` file
+1. Open Telegram and search for [@BotFather](https://t.me/botfather).
+2. Send the command `/newbot` and follow the instructions.
+3. BotFather will provide you with a token (copy this to `TELEGRAM_TOKEN` in your `.env` file).
+4. Start a chat with your new bot by clicking the link provided by BotFather.
+5. To get your chat ID, start a chat with [@userinfobot](https://t.me/userinfobot).
+6. The bot will reply with your account information, including your Chat ID.
+7. Copy this Chat ID to `TELEGRAM_CHAT_ID` in your `.env` file.
 
 ## 🎮 Usage
 
@@ -155,19 +218,20 @@ The bot requires the following environment variables to be set in your `.env` fi
 
 Once configured, the bot will:
 
-1. Start a webhook server listening for GitHub events
-2. Initialize the Telegram bot
-3. Send a startup message to your Telegram chat
-4. Process incoming webhook events and send notifications
+1. Start a webhook server listening for GitHub Sponsors events (if configured).
+2. Initialize the Telegram bot.
+3. Start polling threads for Binance and/or IMAP email alerts (if configured and enabled).
+4. Send a startup message to your Telegram chat indicating active services.
+5. Process incoming events/data and send notifications.
 
 The bot logs its activity to both the console and a log file (`github_sponsors_bot.log`).
 
 ### Testing the Webhook
 
-You can test the webhook integration without setting up a real GitHub webhook by using the included test script:
+You can test the GitHub Sponsors webhook integration without setting up a real GitHub webhook by using the included test script:
 
 ```bash
-python test_webhook.py
+python3 test_webhook.py # Or use 'python'
 ```
 
 This will send a simulated GitHub Sponsors webhook event to your local server. If everything is set up correctly, you should receive a notification in your Telegram chat.
@@ -187,141 +251,65 @@ Then update your GitHub webhook URL with the ngrok URL (e.g., `https://a1b2c3d4.
 For local development or personal use, you can run the bot directly on your machine:
 
 ```bash
-python github_sponsors_bot.py
+python3 github_sponsors_bot.py # Or use 'python'
 ```
 
-To keep the bot running after you close your terminal, you can use tools like:
-
-- `nohup` on Linux/macOS:
-  ```bash
-  nohup python github_sponsors_bot.py &
-  ```
-- `screen` or `tmux` for terminal sessions:
-  ```bash
-  screen -S sponsors-bot
-  python github_sponsors_bot.py
-  # Press Ctrl+A, D to detach
-  ```
-- Windows Task Scheduler for Windows systems
+To keep the bot running after you close your terminal, use tools like `nohup` (Linux/macOS), `screen`/`tmux`, or Windows Task Scheduler.
 
 ### Cloud Deployment
 
-For production use, we recommend deploying to a cloud provider:
-
-#### Heroku
-
-1. Install the [Heroku CLI](https://devcenter.heroku.com/articles/heroku-cli)
-2. Login and create a new app:
-   ```bash
-   heroku login
-   heroku create your-app-name
-   ```
-3. Set environment variables:
-   ```bash
-   heroku config:set GITHUB_WEBHOOK_SECRET=your_secret
-   heroku config:set TELEGRAM_TOKEN=your_telegram_token
-   heroku config:set TELEGRAM_CHAT_ID=your_chat_id
-   ```
-4. Deploy the app:
-   ```bash
-   git push heroku main
-   ```
-5. Update your GitHub webhook URL to `https://your-app-name.herokuapp.com/webhook/github`
-
-#### AWS
-
-1. Create an EC2 instance
-2. Install Docker on the instance
-3. Clone the repository and build the Docker image
-4. Run the container with your environment variables
-5. Set up a load balancer or Elastic IP for a stable endpoint
-6. Update your GitHub webhook URL with your instance's public address
-
-#### Digital Ocean
-
-1. Create a Droplet
-2. Install Docker on the Droplet
-3. Clone the repository and build the Docker image
-4. Run the container with your environment variables
-5. Set up a Floating IP for a stable endpoint
-6. Update your GitHub webhook URL with your Droplet's public address
+For production use, deploying to a cloud provider is recommended. The Docker setup facilitates this. Examples include Heroku, AWS EC2, Digital Ocean Droplets. Ensure your environment variables are securely configured on the cloud platform.
 
 ## 🏗️ Architecture
 
-The bot is designed with a simple, single-file architecture for ease of understanding and maintenance. For more details on the architecture, see [ARCHITECTURE.md](ARCHITECTURE.md).
+The bot is designed with a modular architecture:
+- **Main Application (`github_sponsors_bot.py`)**: Handles core logic, Flask web server for GitHub webhooks, Telegram bot initialization, and orchestration of polling threads.
+- **Payment Source Modules (`payment_sources/`)**:
+    - `binance_alerts.py`: Connects to Binance API, fetches payment data.
+    - `imap_alerts.py`: Connects to IMAP server, fetches and parses emails for UPI/HDFC.
+- **Configuration**: Managed via environment variables (`.env` file).
 
-Key components:
-
-1. **Flask Web Server**: Handles incoming webhook requests
-2. **Webhook Handler**: Verifies and processes GitHub webhook events
-3. **Telegram Bot**: Sends notifications to your Telegram chat
+For more details, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## 🔍 Troubleshooting
 
 ### Common Issues
 
-#### Webhook Not Receiving Events
-
-- **Problem**: GitHub webhook events aren't being received by your server.
-- **Solutions**:
-  - Verify your server is publicly accessible
-  - Check that the webhook URL in GitHub settings is correct
-  - Ensure your server is running and listening on the correct port
-  - Check firewall settings to allow incoming connections
-  - Look at GitHub webhook delivery logs for error details
-
-#### Invalid Signature Errors
-
-- **Problem**: Webhook requests are being rejected due to invalid signatures.
-- **Solutions**:
-  - Verify the webhook secret in your `.env` file matches the one in GitHub settings
-  - Ensure the webhook payload is not being modified in transit (use HTTPS)
-  - Check that the content type is set to `application/json` in GitHub webhook settings
-
-#### Telegram Bot Not Sending Messages
-
-- **Problem**: Notifications aren't being sent to Telegram.
-- **Solutions**:
-  - Confirm your bot token is correct
-  - Ensure you've started a conversation with your bot
-  - Verify your chat ID is correct
-  - Check if the bot has been blocked or deleted
-  - Look at the bot logs for error messages
-
-#### Docker Container Issues
-
-- **Problem**: Docker container won't start or crashes.
-- **Solutions**:
-  - Check Docker logs: `docker logs sponsors-bot`
-  - Verify environment variables are set correctly
-  - Ensure the required ports are available
-  - Check for permission issues
+- **Webhook Not Receiving Events (GitHub)**:
+  - Verify server accessibility, webhook URL, server status, firewall.
+  - Check GitHub webhook delivery logs.
+- **Invalid Signature Errors (GitHub)**:
+  - Match `GITHUB_WEBHOOK_SECRET` between GitHub and `.env`.
+  - Ensure `application/json` content type.
+- **Telegram Bot Not Sending Messages**:
+  - Correct `TELEGRAM_TOKEN` and `TELEGRAM_CHAT_ID`.
+  - Ensure you've started a chat with the bot.
+- **Binance/IMAP Alerts Not Working**:
+  - Double-check API keys/credentials in `.env`.
+  - Verify polling intervals and necessary permissions (Binance API, IMAP access).
+  - Check logs for specific error messages from these modules.
+  - For IMAP, ensure email filters (`UPI_EMAIL_SENDER_FILTER`, `HDFC_EMAIL_SENDER_FILTER`) are correctly set if used, and that the parsing logic in `imap_alerts.py` matches your email formats.
+- **Docker Container Issues**:
+  - Check Docker logs: `docker logs payment-alert-bot`.
+  - Verify environment variables and port availability.
 
 ### Debugging
 
-To enable more detailed logging, you can modify the logging level in `github_sponsors_bot.py`:
-
+To enable more detailed logging, modify the logging level in `github_sponsors_bot.py`:
 ```python
 logging.basicConfig(
     level=logging.DEBUG,  # Change from INFO to DEBUG
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('github_sponsors_bot.log')
-    ]
+    # ... rest of the config
 )
 ```
 
 ## ⚡ Performance Optimization
 
-For optimal performance:
-
-1. **Use HTTPS**: Always use HTTPS for your webhook endpoint to ensure secure communication.
-2. **Minimize Response Time**: The webhook handler should process events quickly to avoid timeouts.
-3. **Use a Production WSGI Server**: For production deployments, use Gunicorn (included in the Docker setup) or uWSGI instead of Flask's development server.
-4. **Monitor Resource Usage**: Keep an eye on CPU and memory usage, especially for high-traffic repositories.
-5. **Implement Rate Limiting**: If you expect a high volume of sponsorships, consider implementing rate limiting for Telegram notifications.
-6. **Use a Reverse Proxy**: For production deployments, use Nginx or Apache as a reverse proxy in front of the application.
+- **Use HTTPS**: For GitHub webhook endpoint.
+- **Efficient Polling**: Set reasonable `BINANCE_POLL_INTERVAL` and `IMAP_POLL_INTERVAL` to avoid excessive API/server load.
+- **Production WSGI Server**: For production, use Gunicorn (included in Docker) or uWSGI.
+- **Monitor Resources**: Keep an eye on CPU/memory.
+- **Reverse Proxy**: Use Nginx or Apache for production deployments.
 
 ## 🤝 Contributing
 

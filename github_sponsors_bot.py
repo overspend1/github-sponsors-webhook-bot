@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """
-GitHub Sponsors Webhook Bot
+GitHub Sponsors and Multi-Source Payment Alert Bot
 
-This bot receives GitHub Sponsors webhook events and sends notifications to Telegram.
+This bot:
+- Receives GitHub Sponsors webhook events and sends notifications to Telegram.
+- Polls Binance for new cryptocurrency deposits and P2P payments.
+- Polls an IMAP email account for UPI and HDFC Bank payment notifications.
 It provides real-time payment notifications with complete transaction details.
 
 Usage:
@@ -14,6 +17,21 @@ Environment variables required:
     TELEGRAM_CHAT_ID - Telegram chat ID to send notifications to
     WEBHOOK_HOST - Host to bind the webhook server to (default: 0.0.0.0)
     WEBHOOK_PORT - Port to bind the webhook server to (default: 5000)
+
+    # Binance Alerts (Optional)
+    BINANCE_API_KEY - Binance API Key
+    BINANCE_API_SECRET - Binance API Secret
+    BINANCE_POLL_INTERVAL - Interval in seconds to poll Binance (default: 300)
+
+    # IMAP Email Alerts (Optional)
+    IMAP_HOST - IMAP server host
+    IMAP_PORT - IMAP server port (default: 993 for SSL)
+    IMAP_USER - IMAP account username
+    IMAP_PASSWORD - IMAP account password
+    IMAP_MAILBOX - Mailbox to check (default: INBOX)
+    IMAP_POLL_INTERVAL - Interval in seconds to poll IMAP server (default: 600)
+    UPI_EMAIL_SENDER_FILTER - Optional: Email address or domain to filter UPI emails
+    HDFC_EMAIL_SENDER_FILTER - Optional: Email address or domain to filter HDFC emails
 """
 
 import os
@@ -22,12 +40,17 @@ import logging
 import hmac
 import hashlib
 import sys
+import time
+import threading
 from datetime import datetime
 
 import telegram
 from telegram.ext import Updater, CommandHandler
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
+
+from payment_sources.binance_alerts import BinanceAlerts
+from payment_sources.imap_alerts import ImapAlerts
 
 # Load environment variables
 load_dotenv()
@@ -49,9 +72,15 @@ TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 WEBHOOK_HOST = os.getenv('WEBHOOK_HOST', '0.0.0.0')
 WEBHOOK_PORT = int(os.getenv('WEBHOOK_PORT', 5000))
+BINANCE_POLL_INTERVAL = int(os.getenv('BINANCE_POLL_INTERVAL', 300))
+IMAP_POLL_INTERVAL = int(os.getenv('IMAP_POLL_INTERVAL', 600))
 
 # Initialize Flask app
 app = Flask(__name__)
+
+# Global Alerter Instances
+binance_alerter = None
+imap_alerter = None
 
 class TelegramBot:
     """Class to handle Telegram bot functionality"""
@@ -164,10 +193,7 @@ telegram_bot = TelegramBot(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
 
 def verify_github_signature(request_data, signature_header):
     """Verify that the webhook request is from GitHub using the webhook secret"""
-    if not GITHUB_WEBHOOK_SECRET:
-        logger.warning("GITHUB_WEBHOOK_SECRET not configured, skipping signature verification")
-        return True
-    
+    # GITHUB_WEBHOOK_SECRET is guaranteed to be present due to checks in main()
     if not signature_header:
         logger.error("No X-Hub-Signature-256 header in request")
         return False
@@ -286,8 +312,39 @@ def run_webhook_server():
     app.run(host=WEBHOOK_HOST, port=WEBHOOK_PORT)
 
 
+# --- Polling functions for payment sources ---
+def poll_binance_payments():
+    """Periodically polls Binance for new payments."""
+    global binance_alerter
+    if not binance_alerter or not binance_alerter.enabled:
+        logger.info("Binance alerter not initialized or disabled. Binance polling thread will not run.")
+        return
+    logger.info("Starting Binance payment polling thread.")
+    while True:
+        try:
+            binance_alerter.check_for_new_payments()
+        except Exception as e:
+            logger.error(f"Error in Binance polling loop: {e}")
+        time.sleep(BINANCE_POLL_INTERVAL)
+
+def poll_imap_emails():
+    """Periodically polls IMAP server for new payment emails."""
+    global imap_alerter
+    if not imap_alerter or not imap_alerter.enabled:
+        logger.info("IMAP alerter not initialized or disabled. IMAP polling thread will not run.")
+        return
+    logger.info("Starting IMAP email polling thread.")
+    while True:
+        try:
+            imap_alerter.check_for_new_emails()
+        except Exception as e:
+            logger.error(f"Error in IMAP polling loop: {e}")
+        time.sleep(IMAP_POLL_INTERVAL)
+
 def main():
     """Main function to run the bot"""
+    global binance_alerter, imap_alerter
+
     # Validate required configuration
     if not GITHUB_WEBHOOK_SECRET:
         logger.error("GITHUB_WEBHOOK_SECRET not configured")
@@ -310,12 +367,30 @@ def main():
         sys.exit(1)
     
     telegram_bot.start_polling()
+
+    # Initialize payment alerters
+    binance_alerter = BinanceAlerts(telegram_bot)
+    imap_alerter = ImapAlerts(telegram_bot)
+
+    # Start polling threads
+    if binance_alerter.enabled:
+        binance_thread = threading.Thread(target=poll_binance_payments, daemon=True)
+        binance_thread.start()
+    
+    if imap_alerter.enabled:
+        imap_thread = threading.Thread(target=poll_imap_emails, daemon=True)
+        imap_thread.start()
     
     # Send startup message
     startup_message = (
-        "🚀 *GitHub Sponsors Webhook Bot Started*\n\n"
-        "Ready to receive GitHub Sponsors webhook events and send notifications."
+        "🚀 *Multi-Source Payment Alert Bot Started*\n\n"
+        "Listening for GitHub Sponsors webhooks.\n"
     )
+    if binance_alerter and binance_alerter.enabled:
+        startup_message += "Polling Binance for payments.\n"
+    if imap_alerter and imap_alerter.enabled:
+        startup_message += "Polling IMAP for email notifications.\n"
+    
     telegram_bot.send_message(startup_message)
     
     try:

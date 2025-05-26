@@ -1,157 +1,168 @@
-# GitHub Sponsors Webhook Bot Architecture
+# Multi-Source Payment Alert Bot Architecture
 
-This document provides an overview of the GitHub Sponsors Webhook Bot architecture, explaining the design decisions, component interactions, and data flow.
+This document provides an overview of the Multi-Source Payment Alert Bot architecture, explaining the design decisions, component interactions, and data flow.
 
 ## System Overview
 
-The GitHub Sponsors Webhook Bot is designed to:
+The Multi-Source Payment Alert Bot is designed to:
 
-1. Receive webhook events from GitHub when a new sponsorship is created
-2. Verify the authenticity of these webhook events
-3. Extract relevant information from the webhook payload
-4. Format and send notifications to a Telegram chat
+1.  **Receive GitHub Sponsors Webhook Events**:
+    *   Process webhook events from GitHub when a new sponsorship is created.
+    *   Verify the authenticity of these webhook events.
+    *   Extract relevant information from the webhook payload.
+2.  **Poll Binance for Payments**:
+    *   Connect to the Binance API periodically.
+    *   Fetch new cryptocurrency deposit information.
+    *   Fetch completed P2P payment receipts.
+3.  **Poll IMAP Server for Email Payments**:
+    *   Connect to a configured IMAP email server periodically.
+    *   Fetch new, unread emails.
+    *   Parse emails to identify and extract details from UPI and HDFC Bank payment notifications.
+4.  **Send Notifications**:
+    *   Format and send notifications for all payment types to a configured Telegram chat.
 
-The system is built as a single Python application that combines a webhook server with Telegram bot functionality.
+The system is built as a single Python application that combines a webhook server (for GitHub), polling mechanisms for Binance and IMAP, and Telegram bot functionality.
 
 ## Component Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                                                         │
-│                  GitHub Sponsors Webhook Bot            │
-│                                                         │
-├─────────────┬───────────────────────┬──────────────────┤
-│             │                       │                  │
-│  Flask      │     Webhook           │    Telegram      │
-│  Web Server │     Handler           │    Bot API       │
-│             │                       │                  │
-└─────┬───────┴───────────┬───────────┴────────┬─────────┘
-      │                   │                    │
-      │                   │                    │
-      ▼                   ▼                    ▼
-┌─────────────┐   ┌───────────────┐    ┌──────────────┐
-│             │   │               │    │              │
-│  GitHub     │   │  Webhook      │    │  Telegram    │
-│  API        │   │  Events       │    │  Chat        │
-│             │   │               │    │              │
-└─────────────┘   └───────────────┘    └──────────────┘
+                                External Systems
+                                      │
+                                      ▼
+        ┌─────────────────────┐   ┌───────────────────┐   ┌───────────────────────────┐
+        │ GitHub Webhooks     │   │ Binance API       │   │ IMAP Email Server         │
+        │ (Sponsors Events)   │   │ (Deposits, P2P)   │   │ (UPI/HDFC Notifications)  │
+        └──────────┬──────────┘   └─────────┬─────────┘   └────────────┬────────────┘
+                   │                        │                          │
+                   │ (HTTPS POST)           │ (API Calls)              │ (IMAP Commands)
+                   ▼                        ▼                          ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                                                                                         │
+│                                Multi-Source Payment Alert Bot                           │
+│                                  (github_sponsors_bot.py)                               │
+│                                                                                         │
+├─────────────────────────┬──────────────────────────┬────────────────────────────────────┤
+│                         │                          │                                    │
+│  Flask Web Server       │  Payment Source Modules  │  Telegram Bot                      │
+│  (Webhook Endpoint)     │  (Polling & Parsing)     │  (Notification & Commands)         │
+│                         │                          │                                    │
+└───────────┬─────────────┴─────────────┬────────────┴───────────────────┬────────────────┘
+            │                           │                                │
+            │ (Webhook Data)            │ (Payment Data)                 │ (Formatted Messages)
+            ▼                           ▼                                ▼
+┌─────────────────────────┐ ┌──────────────────────────┐   ┌───────────────────────────────────┐
+│ Webhook Handler         │ │ BinanceAlerts Module     │   │ Telegram API                      │
+│ - Signature Verification│ │ - API Client             │   │ (python-telegram-bot)             │
+│ - GitHub Event Parsing  │ │ - Deposit/P2P Fetching   │   └───────────────────┬───────────────┘
+│ - Message Formatting    │ │ - Message Formatting     │                       │
+└─────────────────────────┘ └──────────────────────────┘                       │
+                            ┌──────────────────────────┐                       │
+                            │ ImapAlerts Module        │                       │
+                            │ - IMAP Client            │                       │
+                            │ - Email Fetching/Parsing │                       │
+                            │ - Message Formatting     │                       │
+                            └──────────────────────────┘                       │
+                                                                               │
+                                                                               ▼
+                                                                     ┌─────────────────┐
+                                                                     │ Telegram Chat   │
+                                                                     │ (User/Group)    │
+                                                                     └─────────────────┘
 ```
 
 ### Core Components
 
-1. **Flask Web Server**
-   - Provides HTTP endpoints for receiving webhook events
-   - Handles routing and request/response processing
-   - Exposes health check endpoint for monitoring
+1.  **Main Application (`github_sponsors_bot.py`)**:
+    *   **Flask Web Server**:
+        *   Provides HTTP endpoints (e.g., `/webhook/github`) for receiving GitHub Sponsors webhook events.
+        *   Handles routing and request/response processing.
+        *   Exposes a health check endpoint (`/health`).
+    *   **TelegramBot Class**:
+        *   Manages all communication with the Telegram API using `python-telegram-bot`.
+        *   Sends formatted notifications to the configured chat.
+        *   Handles Telegram commands (e.g., `/start`, `/help`, `/status`).
+        *   Manages bot lifecycle (initialization, polling for commands, shutdown).
+    *   **Polling Orchestration**:
+        *   Initializes and manages separate threads for polling Binance and IMAP payment sources at configured intervals.
+    *   **Configuration Management**:
+        *   Loads all necessary credentials and settings from environment variables using `python-dotenv`.
 
-2. **Webhook Handler**
-   - Verifies webhook signatures using HMAC-SHA256
-   - Parses and validates webhook payloads
-   - Extracts relevant sponsorship information
-   - Formats notification messages
-
-3. **Telegram Bot API**
-   - Manages communication with the Telegram API
-   - Sends formatted notifications to the configured chat
-   - Handles command processing for bot interactions
-   - Manages bot lifecycle (initialization, polling, shutdown)
+2.  **Payment Source Modules (`payment_sources/`)**:
+    *   **`BinanceAlerts` Module (`binance_alerts.py`)**:
+        *   Responsible for interacting with the Binance API.
+        *   Fetches new cryptocurrency deposit data.
+        *   Fetches completed P2P payment receipts.
+        *   Formats Binance-specific payment data into notification messages.
+        *   Manages Binance API credentials securely.
+        *   Includes logic to avoid sending duplicate alerts (placeholder).
+    *   **`ImapAlerts` Module (`imap_alerts.py`)**:
+        *   Connects to a specified IMAP email server.
+        *   Fetches new/unread emails from the configured mailbox.
+        *   Parses email content (subject, sender, body) to identify and extract details from UPI and HDFC Bank payment notifications. This logic is highly dependent on email formats and may require custom regex/string parsing.
+        *   Formats extracted email payment data into notification messages.
+        *   Manages IMAP credentials securely.
 
 ## Data Flow
 
-1. **Webhook Reception**
-   - GitHub sends a POST request to the `/webhook/github` endpoint
-   - The request includes headers with event type and signature
-   - The payload contains details about the sponsorship event
+1.  **GitHub Sponsors Webhook**:
+    *   GitHub sends a POST request to `/webhook/github`.
+    *   The Flask server routes it to the `github_webhook` handler.
+    *   **Signature Verification**: The handler verifies the `X-Hub-Signature-256` using the `GITHUB_WEBHOOK_SECRET`. Invalid requests are rejected.
+    *   **Event Processing**: For valid 'sponsorship' events (action: 'created'), the payload is parsed by `format_sponsor_message`.
+    *   **Notification**: The formatted message is sent via the `TelegramBot` instance.
 
-2. **Signature Verification**
-   - The webhook handler extracts the signature from the headers
-   - It computes an HMAC-SHA256 hash of the request body using the webhook secret
-   - It compares the computed hash with the provided signature
-   - If they don't match, the request is rejected
+2.  **Binance Payment Polling**:
+    *   A dedicated thread periodically calls `binance_alerter.check_for_new_payments()`.
+    *   The `BinanceAlerts` module connects to the Binance API using `BINANCE_API_KEY` and `BINANCE_API_SECRET`.
+    *   It fetches deposit history and P2P trade history.
+    *   New/relevant transactions are identified (logic to prevent duplicates is needed).
+    *   Data is formatted by `format_deposit_message` or `format_p2p_message`.
+    *   **Notification**: The formatted message is sent via the `TelegramBot` instance.
 
-3. **Event Processing**
-   - For valid requests, the event type is checked
-   - For 'sponsorship' events with 'created' action, the payload is processed
-   - Relevant information (sponsor name, amount, tier, etc.) is extracted
-   - A formatted message is created
-
-4. **Notification Delivery**
-   - The formatted message is sent to the Telegram API
-   - The message is delivered to the configured chat ID
-   - Delivery status is logged
+3.  **IMAP Email Polling (UPI/HDFC)**:
+    *   A dedicated thread periodically calls `imap_alerter.check_for_new_emails()`.
+    *   The `ImapAlerts` module connects to the IMAP server using `IMAP_HOST`, `IMAP_USER`, `IMAP_PASSWORD`, etc.
+    *   It fetches new/unread emails from `IMAP_MAILBOX`.
+    *   Emails are filtered (optionally by sender/subject) and parsed by `parse_payment_email` to extract UPI/HDFC transaction details.
+    *   Extracted data is formatted by `format_email_payment_message`.
+    *   **Notification**: The formatted message is sent via the `TelegramBot` instance.
 
 ## Security Considerations
 
-1. **Webhook Signature Verification**
-   - All webhook requests are verified using HMAC-SHA256 signatures
-   - This ensures that only GitHub can send valid webhook events
-   - The webhook secret is stored securely as an environment variable
-
-2. **Environment Variables**
-   - Sensitive information (tokens, secrets) is stored in environment variables
-   - These are never logged or exposed in responses
-   - The .env file is excluded from version control via .gitignore
-
-3. **Docker Security**
-   - The application runs as a non-root user in Docker
-   - Only necessary ports are exposed
-   - Dependencies are pinned to specific versions
+1.  **Webhook Signature Verification**: Ensures GitHub webhook authenticity.
+2.  **Environment Variables**: All sensitive data (API keys, tokens, passwords, secrets) are stored in environment variables and loaded via `.env` (which is gitignored).
+3.  **Binance API Security**:
+    *   API keys should be configured with minimal necessary permissions (e.g., read-only for transactions).
+    *   Avoid enabling trading or withdrawal permissions unless essential.
+4.  **IMAP Security**:
+    *   Uses IMAP SSL/TLS by default (port 993).
+    *   IMAP credentials should be for a dedicated or restricted-access email account if possible.
+5.  **Docker Security**: If used, the application should run as a non-root user, expose only necessary ports, and pin dependencies.
 
 ## Performance Considerations
 
-1. **Webhook Processing**
-   - Webhook processing is designed to be lightweight and fast
-   - Responses are returned quickly to acknowledge receipt
-   - Processing happens synchronously to ensure delivery order
-
-2. **Error Handling**
-   - Comprehensive error handling prevents crashes
-   - Failed webhook processing doesn't affect future events
-   - All errors are logged for debugging
-
-3. **Scalability**
-   - The application can be deployed behind a load balancer for horizontal scaling
-   - Stateless design allows for multiple instances
-   - Can be deployed in containerized environments like Kubernetes
+1.  **Webhook Processing**: Designed to be lightweight and respond quickly.
+2.  **Polling Intervals**: `BINANCE_POLL_INTERVAL` and `IMAP_POLL_INTERVAL` should be set to reasonable values to balance responsiveness with API/server load.
+3.  **Email Parsing**: Complex regex or inefficient string operations in `imap_alerts.py` could become a bottleneck if email volume is high or emails are very large. Optimize parsing logic.
+4.  **Error Handling**: Robust error handling within polling loops and API interactions prevents crashes.
+5.  **Threading**: Background tasks (polling) are handled in separate threads to prevent blocking the main application (Flask server and Telegram command polling).
 
 ## Configuration
 
-The application is configured through environment variables:
-
-- `GITHUB_WEBHOOK_SECRET`: Secret for verifying webhook signatures
-- `TELEGRAM_TOKEN`: Telegram Bot API token
-- `TELEGRAM_CHAT_ID`: Telegram chat ID to send notifications to
-- `WEBHOOK_HOST`: Host to bind the webhook server to (default: 0.0.0.0)
-- `WEBHOOK_PORT`: Port to bind the webhook server to (default: 5000)
+The application is configured through environment variables, detailed in `.env.example` and the main `README.md`. This includes credentials for GitHub, Telegram, Binance, and IMAP, as well as polling intervals and server settings.
 
 ## Testing Strategy
 
-1. **Unit Testing**
-   - Individual components are tested in isolation
-   - Mocks are used for external dependencies
-
-2. **Integration Testing**
-   - The `test_webhook.py` script simulates GitHub webhook events
-   - This tests the full flow from webhook reception to notification
-
-3. **Manual Testing**
-   - The README includes instructions for manual testing
-   - GitHub's webhook delivery replay feature can be used for testing
+1.  **Unit Testing**: Individual modules and functions (e.g., message formatters, parsing logic) should be tested in isolation, mocking external API/IMAP calls.
+2.  **Integration Testing**:
+    *   GitHub Webhook: `test_webhook.py` script.
+    *   Binance/IMAP: Standalone test blocks within `binance_alerts.py` and `imap_alerts.py` can be used with test credentials or mocked responses.
+3.  **Manual Testing**: End-to-end testing by triggering real events or sending test emails.
 
 ## Future Enhancements
 
-1. **Additional Notification Channels**
-   - Support for other messaging platforms (Slack, Discord, etc.)
-   - Email notifications
-
-2. **Enhanced Filtering**
-   - Filter notifications based on sponsorship tier
-   - Custom notification templates per tier
-
-3. **Analytics**
-   - Track sponsorship statistics
-   - Generate reports on sponsorship activity
-
-4. **Admin Interface**
-   - Web interface for configuration and monitoring
-   - Real-time dashboard of sponsorship activity
+1.  **Persistent State for Polling**: For Binance and IMAP, implement a persistent way (e.g., small DB, file) to store IDs of processed transactions/emails to robustly prevent duplicate alerts across bot restarts.
+2.  **Advanced Email Parsing**: Use more sophisticated email parsing libraries or techniques if regex becomes too complex for UPI/HDFC emails.
+3.  **More Notification Channels**: Support Slack, Discord, etc.
+4.  **Admin Interface**: A simple web UI for status monitoring or configuration.
+5.  **Scheduler**: Replace basic threading with a more robust scheduler like `APScheduler` for polling tasks.
